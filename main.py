@@ -29,6 +29,7 @@ def checkUsers():
         openPage(user)
         
 
+
 def parseFiles(user, driver):
             try:
                 time.sleep(1)
