@@ -1,6 +1,6 @@
 import pyrebase
 from selenium import webdriver
-from selenium.common.exceptions import NoSuchElementException
+from selenium.common.exceptions import NoSuchElementException, TimeoutException, StaleElementReferenceException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -9,6 +9,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 import time
 from config import firebaseConfig
+import aiogram.utils.markdown as fmt
 firebase = pyrebase.initialize_app(firebaseConfig)
 db= firebase.database()
 
@@ -26,28 +27,62 @@ def checkUsers():
     for user in users:
         user_id = user.key()
         user = db.child("Users").child(user_id).get().val()
-        openPage(user)
+        openPage(user, user_id)
         
 
 
-def parseFiles(user, driver):
-            try:
-                time.sleep(1)
-                table = ""
-                table =  WebDriverWait(driver, 1).until(
-    EC.visibility_of_element_located((By.XPATH, '//*[@id="mytable"]/tbody'))).find_elements(By.TAG_NAME, "tr")
-            except Exception as e:
-                print(e)
-                pass
-            finally: 
-                for row in table:
-                    time.sleep(1)
-                    file = row.find_elements(By.TAG_NAME, "td")
-                    if len(file)>3 and file[2].text != "":
-                        fileName = file[2].find_element(By.TAG_NAME, "a").get_attribute("href")
-                        db.child("Files").child(file[3].text).child(file[1].text.replace(".", "").replace("[", "").replace("]", "")).update({user["login"].replace(".", ""): str(fileName)})
 
-def openPage(user):
+def parseMessages(driver, user_id):
+    try:
+        messages = ""
+        messages =WebDriverWait(driver, 1).until(
+    EC.visibility_of_element_located((By.CSS_SELECTOR, '[style="text-align: left; font: normal 0.9em verdana; cursor: pointer;"]'))).find_elements(By.TAG_NAME, 'tr')          
+    except TimeoutException:
+        print(user_id)
+        return
+    else:
+        for mes in messages:
+            td = mes.find_elements(By.TAG_NAME, "td")
+            if "show" in mes.get_attribute("id"): pass
+            if len(td)<5: pass
+            else:
+                if td[0].text=="":  pass
+                else:
+                    time.sleep(0.5)
+                    try:
+                        filesFromMes = td[2].find_elements(By.TAG_NAME, "a")
+                    except StaleElementReferenceException:
+                        print(user_id)
+                    else:
+                        fls = ""
+                        for fil in filesFromMes:
+                            fls+=fmt.hlink(url = fil.get_attribute("href"), title=fil.text + "\n")
+                        date =  td[0].text 
+                        theme = td[1].text 
+                        teacher = td[3].text 
+                        td[1].click()
+                        idMes = mes.get_attribute("id")
+                        try:
+                            textMes = WebDriverWait(driver, 1).until(
+        EC.visibility_of_element_located((By.ID, idMes.replace("tr", "show")))).find_element(By.TAG_NAME, 'span').text
+                        except TimeoutException:
+                            print(user_id)
+                            return
+                        td[1].click()
+                        if theme=="": theme="--"
+                        if teacher=="": teacher="--"
+                        if fls=="": fls="--"
+                        if textMes=="": textMes="--"
+                        json = {"date": date, "theme": theme, "teacher": teacher, "files": fls, "textMessage": textMes}
+                        if db.child("Messages").child(user_id).child(json["date"]).get().val() == json:   
+                            pass
+                            return
+                            
+                        else:   db.child("Messages").child(user_id).child(json["date"]).update(json)
+                        
+
+
+def openPage(user, user_id):
     print(user["login"])
     driver = webdriver.Chrome(service = s, options = chrome_options)
     driver.get(url)
@@ -70,23 +105,13 @@ def openPage(user):
             pass
         finally:   
             messages.click()
-            try:
-                mesin = ""
-                mesin = WebDriverWait(driver, 1).until(
-        EC.visibility_of_element_located((By.CLASS_NAME, "mesin")))
-            except Exception as e:
-                print(e)
-                pass
-            finally: 
-                mesin.click()
-                parseFiles(user, driver)
-                while True:
-                    try:
-                        driver.find_element(By.LINK_TEXT, "Следующая").click()
-                    except NoSuchElementException:
-                        driver.quit()
-                        break
-                    else:
-                        parseFiles(user, driver)
-
+            parseMessages(driver, user_id)
+            while True:
+                try:
+                    driver.find_element(By.LINK_TEXT, "Следующая").click()
+                except NoSuchElementException:
+                    driver.quit()
+                    break
+                else:
+                    parseMessages(driver, user_id)
 checkUsers()
